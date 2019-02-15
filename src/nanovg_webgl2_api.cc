@@ -7,6 +7,11 @@
 #include "napi_decoder.h"
 #include "napi_encoder.h"
 
+#define MAX_PAINT_NUMBER 32
+
+#include <ctime>
+#include <cstdlib>
+#include <vector>
 #include <assert.h>
 
 static NVGcontext* vg;
@@ -17,6 +22,24 @@ struct VideoFrameData {
   int height;
   int64_t pts;
 };
+
+NVGpaint paints[MAX_PAINT_NUMBER];
+std::vector<int> paints_box;
+
+void InitializePaints() {
+  for (int i = 0; i < MAX_PAINT_NUMBER; i ++)
+    paints_box.push_back(i);
+}
+
+int AllocatePaint() {
+  int idx = paints_box.back();
+  paints_box.pop_back();
+  return idx;
+}
+
+void FreePaint(int paint) {
+  paints_box.push_back(paint);
+}
 
 napi_value __nvg_beginFrame(napi_env env, napi_callback_info cbinfo) {
   setNAPIenv(env);
@@ -119,6 +142,20 @@ napi_value __nvgFillColor(napi_env env, napi_callback_info cbinfo) {
   return 0;
 }
 
+napi_value __nvg_fillPaint(napi_env env, napi_callback_info cbinfo) {
+  setNAPIenv(env);
+  size_t argc = 1;
+  napi_value nv[1];
+  napi_get_cb_info(env, cbinfo, &argc, nv, 0, 0);
+
+  int paint_id;
+  napi_get_value_int32(env, nv[0], &paint_id);
+  NVGpaint& paint = paints[paint_id];
+
+  nvgFillPaint(vg, paint);
+  return 0;
+}
+
 napi_value __nvgStrokeColor(napi_env env, napi_callback_info cbinfo) {
   setNAPIenv(env);
   size_t argc = 4;
@@ -178,10 +215,52 @@ napi_value __nvg_createImageRGBA(napi_env env, napi_callback_info cbinfo) {
   return napi_encoder<int32_t>::encode(env, image);
 }
 
+napi_value __nvg_imagePattern(napi_env env, napi_callback_info cbinfo) {
+  setNAPIenv(env);
+  size_t argc = 7;
+  napi_value nv[7];
+  napi_value* nvp = nv;
+  napi_get_cb_info(env, cbinfo, &argc, nv, 0, 0);
+
+  double ox, oy, ex, ey, angle, alpha;
+  int image;
+  napi_get_value_double(env, *nvp++, &ox);
+  napi_get_value_double(env, *nvp++, &oy);
+  napi_get_value_double(env, *nvp++, &ex);
+  napi_get_value_double(env, *nvp++, &ey);
+  napi_get_value_double(env, *nvp++, &angle);
+  napi_get_value_int32(env, *nvp++, &image);
+  napi_get_value_double(env, *nvp++, &alpha);
+
+  int paint = AllocatePaint();
+  paints[paint] = nvgImagePattern(vg, ox, oy, ex, ey, angle, image, alpha);
+
+  return napi_encoder<int32_t>::encode(env, paint);
+}
+
+
 #define DefineAPI(name) \
     napi_value nvg_##name; \
-    napi_create_function(env, "\""#name"\"", NAPI_AUTO_LENGTH, __nvg_##name, NULL, &nvg_##name); \
-    napi_set_named_property(env, handle, "\""#name"\"", nvg_##name);
+    napi_create_function(env, #name, NAPI_AUTO_LENGTH, __nvg_##name, NULL, &nvg_##name); \
+    napi_set_named_property(env, handle, #name, nvg_##name);
+
+VideoFrameData frame;
+
+int random(int min, int max) //range : [min, max)
+{
+   static bool first = true;
+   if (first) 
+   {  
+      srand( time(NULL) ); //seeding for the first time only!
+      first = false;
+   }
+   return min + rand() % (( max + 1 ) - min);
+}
+
+float random() //range : [min, max)
+{
+   return rand();
+}
 
 napi_value __nanovg_webgl2_init(napi_env env, napi_callback_info cbinfo) {
   setNAPIenv(env);
@@ -238,6 +317,8 @@ napi_value __nanovg_webgl2_init(napi_env env, napi_callback_info cbinfo) {
   napi_create_function(env, "fillColor", NAPI_AUTO_LENGTH, __nvgFillColor, NULL, &nvgFillColor_);
   napi_set_named_property(env, handle, "fillColor", nvgFillColor_);
 
+  DefineAPI(fillPaint);
+
   napi_value nvgStrokeColor_;
   napi_create_function(env, "strokeColor", NAPI_AUTO_LENGTH, __nvgStrokeColor, NULL, &nvgStrokeColor_);
   napi_set_named_property(env, handle, "strokeColor", nvgStrokeColor_);
@@ -251,11 +332,23 @@ napi_value __nanovg_webgl2_init(napi_env env, napi_callback_info cbinfo) {
   napi_set_named_property(env, handle, "endFrame", nvgEndFrame_);
 
   DefineAPI(createImageRGBA);
+  DefineAPI(imagePattern);
+
+  frame.data = new uint8_t[200 * 200 * 4];
+  frame.width = 200;
+  frame.height = 200;
+  for (int i = 0; i < 200 * 200 * 4; i ++) {
+    frame.data[i] = random(0, 255);
+  }
+  uint64_t uaddr = reinterpret_cast<uint64_t>(&frame);
+  napi_set_named_property(env, handle, "data", napi_encoder<uint64_t>::encode(env, uaddr));
 
   return handle;
 }
 
 napi_value Init(napi_env env, napi_value exports) {
+
+  InitializePaints();
 
   napi_value init_nanovg;
   napi_create_function(env, "initNanoVG", NAPI_AUTO_LENGTH, __nanovg_webgl2_init, NULL, &init_nanovg);

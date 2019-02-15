@@ -686,13 +686,19 @@ void glStencilOpSeparate(GLenum face, GLenum fail, GLenum zfail, GLenum zpass) {
   );
 }
 
+#include <stdio.h>
 void glTexImage2D(
     GLenum target, GLint level, GLenum internalformat,
     GLsizei width, GLsizei height, GLint border,
     GLenum format, GLenum type, GLvoid* data, GLsizei size) {
   napi_value buf;
-  if (data == NULL) napi_get_null(__napi_env, &buf);
-  else napi_create_external_arraybuffer(__napi_env, data, width * height * size, 0, 0, &buf);
+  napi_value view;
+  if (data == NULL) napi_get_null(__napi_env, &view);
+  else {
+    napi_create_external_arraybuffer(__napi_env, data, width * height * size, 0, 0, &buf);
+    napi_create_typedarray(__napi_env, napi_uint8_array, width * height * size, buf, 0, &view);
+  }
+  printf("width %d , height %d\n",width, height);
   __call_webgl_function(WEBGL_texImage2D,
       __napi_glenum(target),
       __napi_glint(level),
@@ -702,7 +708,7 @@ void glTexImage2D(
       __napi_glint(border),
       __napi_glenum(format),
       __napi_glenum(type),
-      buf
+      view
   );
 }
 
