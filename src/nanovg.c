@@ -67,6 +67,7 @@ enum NVGpointFlags
 
 struct NVGstate {
 	NVGcompositeOperationState compositeOperation;
+	NVGblendEquationState blendEquation;
 	int shapeAntiAlias;
 	NVGpaint fill;
 	NVGpaint stroke;
@@ -391,7 +392,6 @@ void nvgCancelFrame(NVGcontext* ctx)
 void nvgEndFrame(NVGcontext* ctx)
 {
 	ctx->params.renderFlush(ctx->params.userPtr);
-/* ONFIX
 	if (ctx->fontImageIdx != 0) {
 		int fontImage = ctx->fontImages[ctx->fontImageIdx];
 		int i, j, iw, ih;
@@ -417,7 +417,6 @@ void nvgEndFrame(NVGcontext* ctx)
 		for (i = j; i < NVG_MAX_FONTIMAGES; i++)
 			ctx->fontImages[i] = 0;
 	}
-*/
 }
 
 NVGcolor nvgRGB(unsigned char r, unsigned char g, unsigned char b)
@@ -648,6 +647,8 @@ void nvgReset(NVGcontext* ctx)
 	nvg__setPaintColor(&state->fill, nvgRGBA(255,255,255,255));
 	nvg__setPaintColor(&state->stroke, nvgRGBA(0,0,0,255));
 	state->compositeOperation = nvg__compositeOperationState(NVG_SOURCE_OVER);
+	state->blendEquation.modeRGB = GL_FUNC_ADD;
+	state->blendEquation.modeAlpha = GL_FUNC_ADD;
 	state->shapeAntiAlias = 1;
 	state->strokeWidth = 1.0f;
 	state->miterLimit = 10.0f;
@@ -820,6 +821,11 @@ int nvgCreateImageMem(NVGcontext* ctx, int imageFlags, unsigned char* data, int 
 }
 
 int nvgCreateImageRGBA(NVGcontext* ctx, int w, int h, int imageFlags, const unsigned char* data)
+{
+	return ctx->params.renderCreateTexture(ctx->params.userPtr, NVG_TEXTURE_RGBA, w, h, imageFlags, data);
+}
+
+int nvgCreateImageRGBA2(NVGcontext* ctx, int w, int h, int imageFlags, const unsigned char* data)
 {
 	return ctx->params.renderCreateTexture(ctx->params.userPtr, NVG_TEXTURE_RGBA, w, h, imageFlags, data);
 }
@@ -1045,6 +1051,19 @@ void nvgGlobalCompositeBlendFuncSeparate(NVGcontext* ctx, int srcRGB, int dstRGB
 
 	NVGstate* state = nvg__getState(ctx);
 	state->compositeOperation = op;
+}
+
+void nvgBlendEquation(NVGcontext* ctx, int mode) {
+	nvgBlendEquationSeparate(ctx, mode, mode);
+}
+
+void nvgBlendEquationSeparate(NVGcontext* ctx, int modeRGB, int modeAlpha) {
+	NVGblendEquationState eq;
+	eq.modeRGB = modeRGB;
+	eq.modeAlpha = modeAlpha;
+
+	NVGstate* state = nvg__getState(ctx);
+	state->blendEquation = eq;
 }
 
 static int nvg__ptEquals(float x1, float y1, float x2, float y2, float tol)
@@ -2235,7 +2254,7 @@ void nvgFill(NVGcontext* ctx)
 	fillPaint.innerColor.a *= state->alpha;
 	fillPaint.outerColor.a *= state->alpha;
 
-	ctx->params.renderFill(ctx->params.userPtr, &fillPaint, state->compositeOperation, &state->scissor, ctx->fringeWidth,
+	ctx->params.renderFill(ctx->params.userPtr, &fillPaint, state->compositeOperation, state->blendEquation, &state->scissor, ctx->fringeWidth,
 						   ctx->cache->bounds, ctx->cache->paths, ctx->cache->npaths);
 
 	// Count triangles

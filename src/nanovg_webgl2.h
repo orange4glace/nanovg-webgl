@@ -179,6 +179,13 @@ struct GLNVGblend
 };
 typedef struct GLNVGblend GLNVGblend;
 
+struct GLNVGblendEquation
+{
+	GLenum modeRGB;
+	GLenum modeAlpha;
+};
+typedef struct GLNVGblendEquation GLNVGblendEquation;
+
 enum GLNVGcallType {
 	GLNVG_NONE = 0,
 	GLNVG_FILL,
@@ -196,6 +203,7 @@ struct GLNVGcall {
 	int triangleCount;
 	int uniformOffset;
 	GLNVGblend blendFunc;
+	GLNVGblendEquation blendEquation;
 };
 typedef struct GLNVGcall GLNVGcall;
 
@@ -287,6 +295,7 @@ struct GLNVGcontext {
 	GLint stencilFuncRef;
 	GLuint stencilFuncMask;
 	GLNVGblend blendFunc;
+	GLNVGblendEquation blendEquation;
 	#endif
 };
 typedef struct GLNVGcontext GLNVGcontext;
@@ -349,6 +358,7 @@ static void glnvg__stencilFunc(GLNVGcontext* gl, GLenum func, GLint ref, GLuint 
 	glStencilFunc(func, ref, mask);
 #endif
 }
+
 static void glnvg__blendFuncSeparate(GLNVGcontext* gl, const GLNVGblend* blend)
 {
 #if NANOVG_GL_USE_STATE_FILTER
@@ -359,6 +369,20 @@ static void glnvg__blendFuncSeparate(GLNVGcontext* gl, const GLNVGblend* blend)
 
 		gl->blendFunc = *blend;
 		glBlendFuncSeparate(blend->srcRGB, blend->dstRGB, blend->srcAlpha,blend->dstAlpha);
+	}
+#else
+	glBlendFuncSeparate(blend->srcRGB, blend->dstRGB, blend->srcAlpha,blend->dstAlpha);
+#endif
+}
+
+static void glnvg__blendEquationSeparate(GLNVGcontext* gl, const GLNVGblendEquation* equation)
+{
+#if NANOVG_GL_USE_STATE_FILTER
+	if ((gl->blendEquation.modeRGB != equation->modeRGB) ||
+		(gl->blendEquation.modeAlpha != equation->modeAlpha)) {
+
+		gl->blendEquation = *equation;
+		glBlendEquationSeparate(equation->modeRGB, equation->modeAlpha);
 	}
 #else
 	glBlendFuncSeparate(blend->srcRGB, blend->dstRGB, blend->srcAlpha,blend->dstAlpha);
@@ -736,6 +760,112 @@ static int glnvg__renderCreate(void* uptr)
 	glFinish();
 
 	return 1;
+}
+
+static int glnvg__renderCreateTexture2(void* uptr, int type, int w, int h,
+    int imageFlags, const unsigned char* data)
+{
+	GLNVGcontext* gl = (GLNVGcontext*)uptr;
+	GLNVGtexture* tex = glnvg__allocTexture(gl);
+
+	if (tex == NULL) return 0;
+
+#ifdef NANOVG_GLES2
+	// Check for non-power of 2.
+	if (glnvg__nearestPow2(w) != (unsigned int)w || glnvg__nearestPow2(h) != (unsigned int)h) {
+		// No repeat
+		if ((imageFlags & NVG_IMAGE_REPEATX) != 0 || (imageFlags & NVG_IMAGE_REPEATY) != 0) {
+			printf("Repeat X/Y is not supported for non power-of-two textures (%d x %d)\n", w, h);
+			imageFlags &= ~(NVG_IMAGE_REPEATX | NVG_IMAGE_REPEATY);
+		}
+		// No mips.
+		if (imageFlags & NVG_IMAGE_GENERATE_MIPMAPS) {
+			printf("Mip-maps is not support for non power-of-two textures (%d x %d)\n", w, h);
+			imageFlags &= ~NVG_IMAGE_GENERATE_MIPMAPS;
+		}
+	}
+#endif
+
+  tex->tex = glCreateTexture();
+	tex->width = w;
+	tex->height = h;
+	tex->type = type;
+	tex->flags = imageFlags;
+	glnvg__bindTexture(gl, tex->tex);
+
+	glPixelStorei(GL_UNPACK_ALIGNMENT,1);
+#ifndef NANOVG_GLES2
+	glPixelStorei(GL_UNPACK_ROW_LENGTH, tex->width);
+	glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+	glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+#endif
+
+#if defined (NANOVG_GL2)
+	// GL 1.4 and later has support for generating mipmaps using a tex parameter.
+	if (imageFlags & NVG_IMAGE_GENERATE_MIPMAPS) {
+		glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP, GL_TRUE);
+	}
+#endif
+
+	if (type == NVG_TEXTURE_RGBA)
+		glTexImage2D2(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, (GLvoid*)data, 4);
+	else
+#if defined(NANOVG_GLES2) || defined (NANOVG_GL2)
+		glTexImage2D2(GL_TEXTURE_2D, 0, GL_LUMINANCE, w, h, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, data, 1);
+#elif defined(NANOVG_GLES3) || defined(NANOVG_WEBGL2)
+		glTexImage2D2(GL_TEXTURE_2D, 0, GL_R8, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, (GLvoid*)data, 1);
+#else
+		glTexImage2D2(GL_TEXTURE_2D, 0, GL_RED, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, data, 1);
+#endif
+
+	if (imageFlags & NVG_IMAGE_GENERATE_MIPMAPS) {
+		if (imageFlags & NVG_IMAGE_NEAREST) {
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+		} else {
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		}
+	} else {
+		if (imageFlags & NVG_IMAGE_NEAREST) {
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		} else {
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		}
+	}
+
+	if (imageFlags & NVG_IMAGE_NEAREST) {
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	} else {
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	}
+
+	if (imageFlags & NVG_IMAGE_REPEATX)
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	else
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+
+	if (imageFlags & NVG_IMAGE_REPEATY)
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	else
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+#ifndef NANOVG_GLES2
+	glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+	glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+	glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+#endif
+
+	// The new way to build mipmaps on GLES and GL3
+#if !defined(NANOVG_GL2)
+	if (imageFlags & NVG_IMAGE_GENERATE_MIPMAPS) {
+		glGenerateMipmap(GL_TEXTURE_2D);
+	}
+#endif
+
+	glnvg__checkError(gl, "create tex");
+	glnvg__bindTexture(gl, 0);
+
+	return tex->id;
 }
 
 static int glnvg__renderCreateTexture(void* uptr, int type, int w, int h,
@@ -1159,29 +1289,30 @@ static void glnvg__renderCancel(void* uptr) {
 
 static GLenum glnvg_convertBlendFuncFactor(int factor)
 {
-	if (factor == NVG_ZERO)
-		return GL_ZERO;
-	if (factor == NVG_ONE)
-		return GL_ONE;
-	if (factor == NVG_SRC_COLOR)
-		return GL_SRC_COLOR;
-	if (factor == NVG_ONE_MINUS_SRC_COLOR)
-		return GL_ONE_MINUS_SRC_COLOR;
-	if (factor == NVG_DST_COLOR)
-		return GL_DST_COLOR;
-	if (factor == NVG_ONE_MINUS_DST_COLOR)
-		return GL_ONE_MINUS_DST_COLOR;
-	if (factor == NVG_SRC_ALPHA)
-		return GL_SRC_ALPHA;
-	if (factor == NVG_ONE_MINUS_SRC_ALPHA)
-		return GL_ONE_MINUS_SRC_ALPHA;
-	if (factor == NVG_DST_ALPHA)
-		return GL_DST_ALPHA;
-	if (factor == NVG_ONE_MINUS_DST_ALPHA)
-		return GL_ONE_MINUS_DST_ALPHA;
-	if (factor == NVG_SRC_ALPHA_SATURATE)
-		return GL_SRC_ALPHA_SATURATE;
-	return GL_INVALID_ENUM;
+	return factor;
+	// if (factor == NVG_ZERO)
+	// 	return GL_ZERO;
+	// if (factor == NVG_ONE)
+	// 	return GL_ONE;
+	// if (factor == NVG_SRC_COLOR)
+	// 	return GL_SRC_COLOR;
+	// if (factor == NVG_ONE_MINUS_SRC_COLOR)
+	// 	return GL_ONE_MINUS_SRC_COLOR;
+	// if (factor == NVG_DST_COLOR)
+	// 	return GL_DST_COLOR;
+	// if (factor == NVG_ONE_MINUS_DST_COLOR)
+	// 	return GL_ONE_MINUS_DST_COLOR;
+	// if (factor == NVG_SRC_ALPHA)
+	// 	return GL_SRC_ALPHA;
+	// if (factor == NVG_ONE_MINUS_SRC_ALPHA)
+	// 	return GL_ONE_MINUS_SRC_ALPHA;
+	// if (factor == NVG_DST_ALPHA)
+	// 	return GL_DST_ALPHA;
+	// if (factor == NVG_ONE_MINUS_DST_ALPHA)
+	// 	return GL_ONE_MINUS_DST_ALPHA;
+	// if (factor == NVG_SRC_ALPHA_SATURATE)
+	// 	return GL_SRC_ALPHA_SATURATE;
+	// return GL_INVALID_ENUM;
 }
 
 static GLNVGblend glnvg__blendCompositeOperation(NVGcompositeOperationState op)
@@ -1263,6 +1394,7 @@ static void glnvg__renderFlush(void* uptr)
 		for (i = 0; i < gl->ncalls; i++) {
 			GLNVGcall* call = &gl->calls[i];
 			glnvg__blendFuncSeparate(gl,&call->blendFunc);
+			glnvg__blendEquationSeparate(gl,&call->blendEquation);
 			if (call->type == GLNVG_FILL)
 				glnvg__fill(gl, call);
 			else if (call->type == GLNVG_CONVEXFILL)
@@ -1379,7 +1511,7 @@ static void glnvg__vset(NVGvertex* vtx, float x, float y, float u, float v)
 }
 
 static void glnvg__renderFill(void* uptr, NVGpaint* paint,
-    NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe,
+    NVGcompositeOperationState compositeOperation, NVGblendEquationState blendEquation, NVGscissor* scissor, float fringe,
 		const float* bounds, const NVGpath* paths, int npaths)
 {
 	GLNVGcontext* gl = (GLNVGcontext*)uptr;
@@ -1397,6 +1529,8 @@ static void glnvg__renderFill(void* uptr, NVGpaint* paint,
 	call->pathCount = npaths;
 	call->image = paint->image;
 	call->blendFunc = glnvg__blendCompositeOperation(compositeOperation);
+	call->blendEquation.modeRGB = blendEquation.modeRGB;
+	call->blendEquation.modeAlpha = blendEquation.modeAlpha;
 
 	if (npaths == 1 && paths[0].convex)
 	{
@@ -1608,6 +1742,7 @@ NVGcontext* nvgCreateWebGL2(int flags)
 	memset(&params, 0, sizeof(params));
 	params.renderCreate = glnvg__renderCreate;
 	params.renderCreateTexture = glnvg__renderCreateTexture;
+	params.renderCreateTexture2 = glnvg__renderCreateTexture2;
 	params.renderDeleteTexture = glnvg__renderDeleteTexture;
 	params.renderUpdateTexture = glnvg__renderUpdateTexture;
 	params.renderGetTextureSize = glnvg__renderGetTextureSize;

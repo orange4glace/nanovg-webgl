@@ -653,6 +653,7 @@ static int glnvg__renderCreate(void* uptr)
 		"		// Combine alpha\n"
 		"		color *= strokeAlpha * scissor;\n"
 		"		result = color;\n"
+		"		result = vec4(0.3,1,1,1);\n"
 		"	} else if (type == 2) {		// Stencil fill\n"
 		"		result = vec4(1,1,1,1);\n"
 		"	} else if (type == 3) {		// Textured tris\n"

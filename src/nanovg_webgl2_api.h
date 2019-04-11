@@ -255,8 +255,17 @@ void glBindVertexArray0() {
 }
 
 // blendColor
-// blendEquation
-// blendEquationSeparate
+
+void glBlendEquation(GLenum mode) {
+  __call_webgl_function(WEBGL_blendEquation,
+      __napi_glenum(mode));
+}
+
+void glBlendEquationSeparate(GLenum modeRGB, GLenum modeAlpha) {
+  __call_webgl_function(WEBGL_blendEquationSeparate,
+      __napi_glenum(modeRGB),
+      __napi_glenum(modeAlpha));
+}
 
 void glBlendFunc(GLenum sfactor, GLenum dfactor) {
   __call_webgl_function(WEBGL_blendFunc,
@@ -698,7 +707,6 @@ void glTexImage2D(
     napi_create_external_arraybuffer(__napi_env, data, width * height * size, 0, 0, &buf);
     napi_create_typedarray(__napi_env, napi_uint8_array, width * height * size, buf, 0, &view);
   }
-  printf("width %d , height %d\n",width, height);
   __call_webgl_function(WEBGL_texImage2D,
       __napi_glenum(target),
       __napi_glint(level),
@@ -710,6 +718,25 @@ void glTexImage2D(
       __napi_glenum(type),
       view
   );
+}
+
+void glTexImage2D2(
+    GLenum target, GLint level, GLenum internalformat,
+    GLsizei width, GLsizei height, GLint border,
+    GLenum format, GLenum type, GLvoid* data, GLsizei size) {
+      printf("%d %d %d %d %d %d %d %d %d\n", target, level, internalformat, width, height, border, format, type, size);
+  napi_value buf;
+  napi_value view;
+  if (data == NULL) napi_get_null(__napi_env, &view);
+  else {
+
+    napi_value global;
+    napi_value func;
+    napi_get_global(__napi_env, &global);
+    napi_get_named_property(__napi_env, global, "func", &func);
+    napi_call_function(__napi_env, global, func, 0, nullptr, nullptr);
+    return;
+  }
 }
 
 // texImage3D

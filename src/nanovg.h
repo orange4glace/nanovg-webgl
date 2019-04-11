@@ -29,6 +29,8 @@ extern "C" {
 #pragma warning(disable: 4201)  // nonstandard extension used : nameless struct/union
 #endif
 
+#include "./webgl2_constant.h"
+
 typedef struct NVGcontext NVGcontext;
 
 struct NVGcolor {
@@ -118,6 +120,12 @@ struct NVGcompositeOperationState {
 };
 typedef struct NVGcompositeOperationState NVGcompositeOperationState;
 
+struct NVGblendEquationState {
+	int modeRGB;
+	int modeAlpha;
+};
+typedef struct NVGblendEquationState NVGblendEquationState;
+
 struct NVGglyphPosition {
 	const char* str;	// Position of the glyph in the input string.
 	float x;			// The x-coordinate of the logical glyph position.
@@ -174,6 +182,9 @@ void nvgGlobalCompositeBlendFunc(NVGcontext* ctx, int sfactor, int dfactor);
 
 // Sets the composite operation with custom pixel arithmetic for RGB and alpha components separately. The parameters should be one of NVGblendFactor.
 void nvgGlobalCompositeBlendFuncSeparate(NVGcontext* ctx, int srcRGB, int dstRGB, int srcAlpha, int dstAlpha);
+
+void nvgBlendEquation(NVGcontext* ctx, int mode);
+void nvgBlendEquationSeparate(NVGcontext* ctx, int modeRGB, int modeAlpha);
 
 //
 // Color utils
@@ -377,6 +388,7 @@ int nvgCreateImageMem(NVGcontext* ctx, int imageFlags, unsigned char* data, int 
 // Creates image from specified image data.
 // Returns handle to the image.
 int nvgCreateImageRGBA(NVGcontext* ctx, int w, int h, int imageFlags, const unsigned char* data);
+int nvgCreateImageRGBA2(NVGcontext* ctx, int w, int h, int imageFlags, const unsigned char* data);
 
 // Updates image data specified by image handle.
 void nvgUpdateImage(NVGcontext* ctx, int image, const unsigned char* data);
@@ -649,13 +661,14 @@ struct NVGparams {
 	int edgeAntiAlias;
 	int (*renderCreate)(void* uptr);
 	int (*renderCreateTexture)(void* uptr, int type, int w, int h, int imageFlags, const unsigned char* data);
+	int (*renderCreateTexture2)(void* uptr, int type, int w, int h, int imageFlags, const unsigned char* data);
 	int (*renderDeleteTexture)(void* uptr, int image);
 	int (*renderUpdateTexture)(void* uptr, int image, int x, int y, int w, int h, const unsigned char* data);
 	int (*renderGetTextureSize)(void* uptr, int image, int* w, int* h);
 	void (*renderViewport)(void* uptr, float width, float height, float devicePixelRatio);
 	void (*renderCancel)(void* uptr);
 	void (*renderFlush)(void* uptr);
-	void (*renderFill)(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe, const float* bounds, const NVGpath* paths, int npaths);
+	void (*renderFill)(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGblendEquationState blendEquation, NVGscissor* scissor, float fringe, const float* bounds, const NVGpath* paths, int npaths);
 	void (*renderStroke)(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe, float strokeWidth, const NVGpath* paths, int npaths);
 	void (*renderTriangles)(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, const NVGvertex* verts, int nverts);
 	void (*renderDelete)(void* uptr);
